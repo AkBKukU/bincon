@@ -67,66 +67,73 @@ def cue_by_line(cue_file, bin_out):
     sector=0
     file_size_full=0
     file_size_used=0
+    if bin_out:
+        output = open(f'{bin_out+session_post}.bin', "w+b")
+        cue = open('cue.cue', 'w')
 
-    output = open(f'{bin_out+session_post}.bin', "w+b")
-    with open('cue.cue', 'w') as cue:
-        for line in cue_lines:
-            # Reset on new session and start new file
-            if "SESSION" in line:
-                result=re.search(r'REM SESSION ([0-9]+)', line)
-                sector=0
-                session=int(result.group(1))
-                file_size_full=0
-                file_size_used=0
-                session_post=f'-s{session}'
+    for line in cue_lines:
+        # Reset on new session and start new file
+        if "SESSION" in line:
+            result=re.search(r'REM SESSION ([0-9]+)', line)
+            sector=0
+            session=int(result.group(1))
+            file_size_full=0
+            file_size_used=0
+            session_post=f'-s{session}'
+            if bin_out:
                 output.close()
                 output = open(f'{bin_out+session_post}.bin', "w+b")
 
-            # Use track to get sector size for upcoming data
-            if "TRACK" in line:
-                result=re.search(r'TRACK ([0-9]+) (.*)', line)
-                if result is not None:
-                    track=result.group(1)
-                    mode_size=CD_MODE_SECTORS[result.group(2).replace("/","_")].value
-                    #print(f'{result.group(1)} : {result.group(2)}')
+        # Use track to get sector size for upcoming data
+        if "TRACK" in line:
+            result=re.search(r'TRACK ([0-9]+) (.*)', line)
+            if result is not None:
+                track=result.group(1)
+                mode_size=CD_MODE_SECTORS[result.group(2).replace("/","_")].value
+                #print(f'{result.group(1)} : {result.group(2)}')
 
-            # Get size of files to calculate length of tracks using sector size
-            if "FILE" in line:
-                if file_size_full == 0:
+        # Get size of files to calculate length of tracks using sector size
+        if "FILE" in line:
+            if file_size_full == 0:
+                if bin_out:
                     cue.write(f'FILE "{bin_out+session_post}.bin" BINARY'+"\n")
 
-                # Copy bin file into output
+            # Copy bin file into output
+            if bin_out:
                 with open(re.search(r'FILE "?(.*?)"? BINARY', line).group(1), "rb") as r:
                     output.write(r.read())
 
-                # Add any unaccounted for data to sector position
-                sector+=file_size_full-file_size_used
+            # Add any unaccounted for data to sector position
+            sector+=file_size_full
 
-                # Reset size
-                file_size_used=0
-                file_size_full=os.path.getsize(re.search(r'FILE "?(.*?)"? BINARY', line).group(1))/mode_size
+            # Reset size
+            file_size_used=0
+            file_size_full=os.path.getsize(re.search(r'FILE "?(.*?)"? BINARY', line).group(1))/mode_size
 
-            # Check for MSF times
-            result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
-            if result is not None:
-                # Add any value to current sector position
-                sector+=msf2sector(result.group(0))
+        # Check for MSF times
+        result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
+        if result is not None:
+            # Add any value to current sector position
+            #sector+=msf2sector(result.group(0))
 
-                # Consume current file data
-                if file_size_full != 0:
-                    file_size_used+=msf2sector(result.group(0))
+            # Consume current file data
+            if file_size_full != 0:
+                file_size_used=msf2sector(result.group(0))
 
-                # Debug
-                #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
+            # Debug
+            #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
 
-                # Update MSF in line
-                line=line.replace(result.group(0),sector2msf(sector))
+            # Update MSF in line
+            line=line.replace(result.group(0),sector2msf(sector+file_size_used))
 
-            if "FILE" not in line:
-                print(line)
+        if "FILE" not in line:
+            print(line)
+            if bin_out:
                 cue.write(line+"\n")
 
 
+    if bin_out:
+        cue.close()
         output.close()
 
 
@@ -140,6 +147,7 @@ if __name__ == "__main__":
             prog='bincon',
             description='BIN/CUE bin concatenation tool to combine multiple BIN files into one.',
             epilog='By Shelby Jueden')
+    parser.add_argument('-d', '--debug', help="Only print CUE, don't write files", action='store_true')
     parser.add_argument('filenames', help="", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
@@ -156,6 +164,9 @@ if __name__ == "__main__":
             bin_out=check
         else:
             cue=check
+
+    if args.debug:
+        bin_out = None
 
     # Check CUE was passed and begin parsing
     if cue is None:
