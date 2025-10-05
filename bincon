@@ -41,24 +41,31 @@ def sector2msf(sector):
 
     return msf
 
-def cue_by_line(cue_file, bin_out):
-    print("Opening file")
+def cue_by_line(cue_file, bin_out,path="./"):
+
+    # Create output folder if it doesn't exist
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # Load CUE file
     cue_lines=None
     with open(cue_file) as file:
         cue_lines = [line.rstrip() for line in file]
 
+    # Count sessions to know if is multisession disc image
     session_total=0
+
     # Check all BIN files exist
     for line in cue_lines:
         if "SESSION" in line:
             session_total+=1
         if "FILE" in line:
-            #print(line)
+            # Exist if file not found
             if not os.path.exists(re.search(r'FILE "?(.*?)"? BINARY', line).group(1)):
                 print(f'BIN file [{re.search(r'FILE "?(.*?)"? BINARY', line).group(1)}] from CUE not found.')
                 sys.exit(1)
 
-    # Main CUE loop
+    # Setup runtime
     mode_size=2352
     session=1
     session_post="" if session_total == 0 or session_total == 1 else f'-s{session}'
@@ -67,10 +74,13 @@ def cue_by_line(cue_file, bin_out):
     sector=0
     file_size_full=0
     file_size_used=0
-    if bin_out:
-        output = open(f'{bin_out+session_post}.bin', "w+b")
-        cue = open('cue.cue', 'w')
 
+    # Prepare output files
+    if bin_out:
+        output = open(f'{path}/{bin_out+session_post}.bin', "w+b")
+        cue = open(f'{path}/{bin_out}.cue', 'w')
+
+    # Main CUE loop
     for line in cue_lines:
         # Reset on new session and start new file
         if "SESSION" in line:
@@ -82,7 +92,7 @@ def cue_by_line(cue_file, bin_out):
             session_post=f'-s{session}'
             if bin_out:
                 output.close()
-                output = open(f'{bin_out+session_post}.bin', "w+b")
+                output = open(f'{path}/{bin_out+session_post}.bin', "w+b")
 
         # Use track to get sector size for upcoming data
         if "TRACK" in line:
@@ -90,7 +100,6 @@ def cue_by_line(cue_file, bin_out):
             if result is not None:
                 track=result.group(1)
                 mode_size=CD_MODE_SECTORS[result.group(2).replace("/","_")].value
-                #print(f'{result.group(1)} : {result.group(2)}')
 
         # Get size of files to calculate length of tracks using sector size
         if "FILE" in line:
@@ -110,34 +119,27 @@ def cue_by_line(cue_file, bin_out):
             file_size_used=0
             file_size_full=os.path.getsize(re.search(r'FILE "?(.*?)"? BINARY', line).group(1))/mode_size
 
-        # Check for MSF times
+        # Check for MSF times in INDEXes
         if "INDEX" in line:
             result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
             if result is not None:
-                # Add any value to current sector position
-                #sector+=msf2sector(result.group(0))
-
                 # Consume current file data
                 if file_size_full != 0:
                     file_size_used=msf2sector(result.group(0))
 
-                # Debug
-                #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
-
                 # Update MSF in line
                 line=line.replace(result.group(0),sector2msf(sector+file_size_used))
 
+        # Pass all lines to new CUE except old FILE lines
         if "FILE" not in line:
             print(line)
             if bin_out:
                 cue.write(line+"\n")
 
-
+    # Close new files
     if bin_out:
         cue.close()
         output.close()
-
-
 
 
 if __name__ == "__main__":
@@ -149,6 +151,7 @@ if __name__ == "__main__":
             description='BIN/CUE bin concatenation tool to combine multiple BIN files into one.',
             epilog='By Shelby Jueden')
     parser.add_argument('-d', '--debug', help="Only print CUE, don't write files", action='store_true')
+    parser.add_argument('-o', '--output-folder', help="Path to output files to", default="./")
     parser.add_argument('filenames', help="", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
@@ -175,4 +178,4 @@ if __name__ == "__main__":
         sys.exit(1)
     else:
         print(f'Working on {cue}')
-        cue_by_line(cue,bin_out)
+        cue_by_line(cue,bin_out,args.output_folder)
