@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+
+# Python System
+import argparse
+import sys
+import os
+import re
+from enum import Enum
+
+class CD_MODE_SECTORS(Enum):
+    AUDIO = 2352
+    CDG = 2448
+    MODE1_RAW = 2352
+    MODE1_2048 = 2048
+    MODE1_2352 = 2352
+    MODE2_RAW = 2352
+    MODE2_2048 = 2048
+    MODE2_2324 = 2324
+    MODE2_2336 = 2336
+    MODE2_2352 = 2352
+    CDI_2336 = 2336
+    CDI_2352 = 2352
+
+
+def msf2sector(msf):
+    sector=0
+    sector+=int(msf.split(":")[0])*60*75
+    sector+=int(msf.split(":")[1])*75
+    sector+=int(msf.split(":")[2])
+
+    return sector
+
+def sector2msf(sector):
+    msf=""
+    m=sector // (60*75)
+    msf+=str(int(m)).zfill(2)+":"
+    s=(sector-(m*(60*75))) // (75)
+    msf+=str(int(s)).zfill(2)+":"
+    f=sector % 75
+    msf+=str(int(f)).zfill(2)
+
+    return msf
+
+def cue_by_line(cue_file):
+    print("Opening file")
+    cue_lines=None
+    with open(cue_file) as file:
+        cue_lines = [line.rstrip() for line in file]
+
+    # Check all BIN files exist
+    for line in cue_lines:
+        if "FILE" in line:
+            #print(line)
+            if not os.path.exists(re.search(r'FILE "?(.*?)"? BINARY', line).group(1)):
+                print(f'BIN file [{re.search(r'FILE "?(.*?)"? BINARY', line).group(1)}] from CUE not found.')
+                sys.exit(1)
+
+    # Main CUE loop
+    mode_size=2352
+    session=1
+    track=0
+    # Track position in data with sector position relative to bin data
+    sector=0
+    file_size_full=0
+    file_size_used=0
+    for line in cue_lines:
+        # Reset on new session and start new file
+        if "SESSION" in line:
+            sector=0
+            session+=1
+            file_size_full=0
+            file_size_used=0
+
+        # Use track to get sector size for upcoming data
+        if "TRACK" in line:
+            result=re.search(r'TRACK ([0-9]+) (.*)', line)
+            if result is not None:
+                track=result.group(1)
+                mode_size=CD_MODE_SECTORS[result.group(2).replace("/","_")].value
+                #print(f'{result.group(1)} : {result.group(2)}')
+
+        # Get size of files to calculate length of tracks using sector size
+        if "FILE" in line:
+            # Add any unaccounted for data to sector position
+            sector+=file_size_full-file_size_used
+
+            # Reset size
+            file_size_used=0
+            file_size_full=os.path.getsize(re.search(r'FILE "?(.*?)"? BINARY', line).group(1))/mode_size
+
+        # Check for MSF times
+        result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
+        if result is not None:
+            # Add any value to current sector position
+            sector+=msf2sector(result.group(0))
+
+            # Consume current file data
+            if file_size_full != 0:
+                file_size_used+=msf2sector(result.group(0))
+
+            # Debug
+            #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
+
+            # Update MSF in line
+            line=line.replace(result.group(0),sector2msf(sector))
+
+        if "FILE" not in line:
+            print(line)
+
+
+
+
+
+
+if __name__ == "__main__":
+    """ Run directly
+
+    """
+    parser = argparse.ArgumentParser(
+            prog='bincon',
+            description='BIN/CUE bin concatenation tool to combine multiple BIN files into one.',
+            epilog='By Shelby Jueden')
+    parser.add_argument('filenames', help="", default=None, nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+
+
+    if len(args.filenames) < 1:
+        print("Please provide a CUE file to work on. And optionally an output BIN name.")
+        sys.exit(1)
+
+    # Allow sloppy file name parameters based on file existing or not
+    cue=None
+    bin_out="data"
+    for check in args.filenames:
+        if not os.path.exists(check):
+            bin_out=check
+        else:
+            cue=check
+
+    # Check CUE was passed and begin parsing
+    if cue is None:
+        print("Make sure CUE file exists.")
+        sys.exit(1)
+    else:
+        print(f'Working on {cue}')
+        cue_by_line(cue)
