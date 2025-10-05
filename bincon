@@ -111,20 +111,21 @@ def cue_by_line(cue_file, bin_out):
             file_size_full=os.path.getsize(re.search(r'FILE "?(.*?)"? BINARY', line).group(1))/mode_size
 
         # Check for MSF times
-        result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
-        if result is not None:
-            # Add any value to current sector position
-            #sector+=msf2sector(result.group(0))
+        if "INDEX" in line:
+            result = re.search(r'[0-9]+:[0-9]+:[0-9]+', line)
+            if result is not None:
+                # Add any value to current sector position
+                #sector+=msf2sector(result.group(0))
 
-            # Consume current file data
-            if file_size_full != 0:
-                file_size_used=msf2sector(result.group(0))
+                # Consume current file data
+                if file_size_full != 0:
+                    file_size_used=msf2sector(result.group(0))
 
-            # Debug
-            #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
+                # Debug
+                #print(f'T{track} - {result.group(0)} : {sector} : {sector2msf(sector)}')
 
-            # Update MSF in line
-            line=line.replace(result.group(0),sector2msf(sector+file_size_used))
+                # Update MSF in line
+                line=line.replace(result.group(0),sector2msf(sector+file_size_used))
 
         if "FILE" not in line:
             print(line)
